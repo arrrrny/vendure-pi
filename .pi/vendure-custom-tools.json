@@ -1,0 +1,16 @@
+{
+  "tools": [
+    {
+      "name": "active_orders",
+      "label": "Active Orders",
+      "description": "List orders awaiting payment or fulfillment",
+      "adminQuery": "query { orders(options: { filter: { state: { eq: \"PaymentAuthorized\" } } take: 20 }) { items { id code state total currencyCode customer { firstName lastName } } } }"
+    },
+    {
+      "name": "list_customers",
+      "label": "List Customers",
+      "description": "List the 10 most recently registered customers",
+      "adminQuery": "query { customers(options: { take: 10, sort: { createdAt: DESC } }) { items { id firstName lastName emailAddress phoneNumber createdAt } } }"
+    }
+  ]
+}

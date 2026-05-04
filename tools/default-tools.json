@@ -1,12 +1,6 @@
 {
   "tools": [
     {
-      "name": "list_users",
-      "label": "List Users",
-      "description": "List all admin users",
-      "adminQuery": "query { administrators { items { id firstName lastName emailAddress } } }"
-    },
-    {
       "name": "store_summary",
       "label": "Store Summary",
       "description": "Quick store overview: product count, order count, customer count",
