@@ -3,8 +3,9 @@
  * Connects to the vendure-mcp-graphql MCP server to provide
  * Vendure Admin and Shop API access as pi agent tools.
  *
- * Only registers generic GraphQL execution + schema discovery tools.
+ * Registers generic GraphQL execution + schema discovery tools.
  * The agent discovers the API surface dynamically via introspection.
+ * Custom tools can be added via JSON config files.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -16,23 +17,50 @@ import { existsSync, readFileSync } from "fs";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { homedir } from "os";
 
 // ─── MCP Client ───────────────────────────────────────────
 
+type ConnectionState = "disconnected" | "connecting" | "connected";
+
 let mcpClient: Client | null = null;
+let connectionState: ConnectionState = "disconnected";
+let connectionPromise: Promise<void> | null = null;
 
 function findMcpServerPath(): string {
   if (process.env.VENDURE_MCP_SERVER_PATH) return process.env.VENDURE_MCP_SERVER_PATH;
   try {
     const which = execSync("which vendure-mcp-graphql 2>/dev/null || echo ''", { encoding: "utf-8" }).trim();
     if (which) return which;
-  } catch { /* nop */ }
+  } catch { /* not on PATH */ }
   if (existsSync("./mcp-graphql/dist/index.js")) return "./mcp-graphql/dist/index.js";
-  throw new Error("vendure-mcp-graphql not found. Run: npm install -g vendure-mcp-graphql");
+  throw new Error(
+    "vendure-mcp-graphql not found. Install with: npm install -g vendure-mcp-graphql"
+  );
+}
+
+async function ensureConnected(): Promise<void> {
+  if (connectionState === "connected" && mcpClient) return;
+
+  if (connectionState === "connecting" && connectionPromise) {
+    await connectionPromise;
+    return;
+  }
+
+  connectionState = "connecting";
+  connectionPromise = connectToMcpServer();
+  try {
+    await connectionPromise;
+    connectionState = "connected";
+  } catch (err) {
+    connectionState = "disconnected";
+    mcpClient = null;
+    connectionPromise = null;
+    throw err;
+  }
 }
 
 async function connectToMcpServer(): Promise<void> {
-  if (mcpClient) return;
   const transport = new StdioClientTransport({
     command: process.argv[0] || "node",
     args: [findMcpServerPath()],
@@ -43,13 +71,17 @@ async function connectToMcpServer(): Promise<void> {
       SHOP_API_URL: process.env.SHOP_API_URL ?? "http://localhost:3000/shop-api",
     },
   });
-  mcpClient = new Client({ name: "vendure-pi", version: "1.0.0" }, { capabilities: {} });
-  await mcpClient.connect(transport);
+  const client = new Client({ name: "vendure-pi", version: "1.0.0" }, { capabilities: {} });
+  await client.connect(transport);
+  mcpClient = client;
   console.error("[vendure-pi] MCP connected");
 }
 
 async function callMcpTool(name: string, args: Record<string, unknown>): Promise<string> {
-  const result = (await mcpClient!.callTool({ name, arguments: args })) as CallToolResult;
+  if (!mcpClient) await ensureConnected();
+  if (!mcpClient) throw new Error("[vendure-pi] MCP client not connected");
+
+  const result = (await mcpClient.callTool({ name, arguments: args })) as CallToolResult;
   const content = result.content as Array<{ type: string; text?: string }>;
   const text = content.map((c) => c.text ?? "").join("\n");
   return result.isError ? `Error: ${text}` : text;
@@ -67,52 +99,67 @@ const Mutation = Type.Object({
   variables: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
 });
 
-function text(text: string) {
-  return { content: [{ type: "text" as const, text }], details: {} };
+function makeResult(value: string) {
+  return { content: [{ type: "text" as const, text: value }], details: {} };
 }
 
 // ─── Extension ────────────────────────────────────────────
 
 export default async function vendureExtension(pi: ExtensionAPI): Promise<void> {
-  // Strip non-vendure tools on every agent start
   pi.on("agent_start", async () => {
-    try { await connectToMcpServer(); } catch { /* nop */ }
-    setTimeout(() => {
-      const active = pi.getActiveTools().filter((t) => t.startsWith("vendure_"));
-      if (active.length) pi.setActiveTools(active);
-    }, 50);
+    try {
+      await ensureConnected();
+    } catch (err) {
+      console.error("[vendure-pi] MCP connection failed:", err instanceof Error ? err.message : err);
+    }
   });
 
   pi.registerTool({
     name: "vendure_admin_query",
     label: "Admin Query",
-    description: "Execute any GraphQL query on the Vendure Admin API. Use list operations to discover available queries first.",
+    description:
+      "Execute a GraphQL query on the Vendure Admin API. Use vendure_list_admin_operations to discover available queries first.",
     parameters: Query,
-    execute: async (_, p) => text(await callMcpTool("admin_query", { query: p.query, variables: p.variables })),
+    execute: async (_, p) => {
+      await ensureConnected();
+      return makeResult(await callMcpTool("admin_query", { query: p.query, variables: p.variables }));
+    },
   });
 
   pi.registerTool({
     name: "vendure_admin_mutation",
     label: "Admin Mutation",
-    description: "Execute any GraphQL mutation on the Vendure Admin API. Use list operations to discover available mutations first.",
+    description:
+      "Execute a GraphQL mutation on the Vendure Admin API. Use vendure_list_admin_operations to discover available mutations first.",
     parameters: Mutation,
-    execute: async (_, p) => text(await callMcpTool("admin_mutation", { mutation: p.mutation, variables: p.variables })),
+    execute: async (_, p) => {
+      await ensureConnected();
+      return makeResult(await callMcpTool("admin_mutation", { mutation: p.mutation, variables: p.variables }));
+    },
   });
 
   pi.registerTool({
     name: "vendure_shop_query",
     label: "Shop Query",
-    description: "Execute any GraphQL query on the Vendure Shop API (customer-facing). Use list operations to discover available queries first.",
+    description:
+      "Execute a GraphQL query on the Vendure Shop API (customer-facing). Use vendure_list_shop_operations to discover available queries first.",
     parameters: Query,
-    execute: async (_, p) => text(await callMcpTool("shop_query", { query: p.query, variables: p.variables })),
+    execute: async (_, p) => {
+      await ensureConnected();
+      return makeResult(await callMcpTool("shop_query", { query: p.query, variables: p.variables }));
+    },
   });
 
   pi.registerTool({
     name: "vendure_shop_mutation",
     label: "Shop Mutation",
-    description: "Execute any GraphQL mutation on the Vendure Shop API (customer-facing). Use list operations to discover available mutations first.",
+    description:
+      "Execute a GraphQL mutation on the Vendure Shop API (customer-facing). Use vendure_list_shop_operations to discover available mutations first.",
     parameters: Mutation,
-    execute: async (_, p) => text(await callMcpTool("shop_mutation", { mutation: p.mutation, variables: p.variables })),
+    execute: async (_, p) => {
+      await ensureConnected();
+      return makeResult(await callMcpTool("shop_mutation", { mutation: p.mutation, variables: p.variables }));
+    },
   });
 
   pi.registerTool({
@@ -120,15 +167,21 @@ export default async function vendureExtension(pi: ExtensionAPI): Promise<void> 
     label: "List Admin Operations",
     description: "Discover all available GraphQL queries and mutations on the Admin API with descriptions.",
     parameters: Empty,
-    execute: async () => text(await callMcpTool("list_admin_operations", {})),
+    execute: async () => {
+      await ensureConnected();
+      return makeResult(await callMcpTool("list_admin_operations", {}));
+    },
   });
 
   pi.registerTool({
     name: "vendure_get_admin_schema",
     label: "Get Admin Schema",
-    description: "Full Admin API GraphQL introspection. Use when you need detailed type information. Prefer list operations for quick discovery.",
+    description: "Full Admin API GraphQL introspection. Use when you need detailed type information. Prefer vendure_list_admin_operations for quick discovery.",
     parameters: Empty,
-    execute: async () => text(await callMcpTool("get_admin_schema", {})),
+    execute: async () => {
+      await ensureConnected();
+      return makeResult(await callMcpTool("get_admin_schema", {}));
+    },
   });
 
   pi.registerTool({
@@ -136,18 +189,22 @@ export default async function vendureExtension(pi: ExtensionAPI): Promise<void> 
     label: "List Shop Operations",
     description: "Discover all available GraphQL queries and mutations on the Shop API with descriptions.",
     parameters: Empty,
-    execute: async () => text(await callMcpTool("list_shop_operations", {})),
+    execute: async () => {
+      await ensureConnected();
+      return makeResult(await callMcpTool("list_shop_operations", {}));
+    },
   });
 
   pi.registerTool({
     name: "vendure_get_shop_schema",
     label: "Get Shop Schema",
-    description: "Full Shop API GraphQL introspection. Prefer list operations for quick discovery.",
+    description: "Full Shop API GraphQL introspection. Prefer vendure_list_shop_operations for quick discovery.",
     parameters: Empty,
-    execute: async () => text(await callMcpTool("get_shop_schema", {})),
+    execute: async () => {
+      await ensureConnected();
+      return makeResult(await callMcpTool("get_shop_schema", {}));
+    },
   });
-
-  // ─── Custom Tools from JSON ──────────────────────────
 
   loadCustomTools(pi);
 }
@@ -168,12 +225,20 @@ interface VendureToolsConfig {
   tools: CustomToolConfig[];
 }
 
+function resolveToolType(tool: CustomToolConfig): { mcpTool: string; argKey: string; gql: string } | null {
+  if (tool.adminQuery) return { mcpTool: "admin_query", argKey: "query", gql: tool.adminQuery };
+  if (tool.shopQuery) return { mcpTool: "shop_query", argKey: "query", gql: tool.shopQuery };
+  if (tool.adminMutation) return { mcpTool: "admin_mutation", argKey: "mutation", gql: tool.adminMutation };
+  if (tool.shopMutation) return { mcpTool: "shop_mutation", argKey: "mutation", gql: tool.shopMutation };
+  return null;
+}
+
 function loadCustomTools(pi: ExtensionAPI): void {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const paths = [
     join(__dirname, "..", "tools", "default-tools.json"),
+    join(homedir(), ".pi", "vendure-custom-tools.json"),
     ".pi/vendure-custom-tools.json",
-    `${process.env.HOME ?? "~"}/.pi/vendure-custom-tools.json`,
   ];
 
   for (const path of paths) {
@@ -182,15 +247,13 @@ function loadCustomTools(pi: ExtensionAPI): void {
     try {
       const raw = readFileSync(path, "utf-8");
       const config: VendureToolsConfig = JSON.parse(raw);
+      let loaded = 0;
 
       for (const tool of config.tools ?? []) {
-        const mcpTool = tool.adminQuery ? "admin_query" :
-                        tool.shopQuery ? "shop_query" :
-                        tool.adminMutation ? "admin_mutation" :
-                        tool.shopMutation ? "shop_mutation" : null;
-        if (!mcpTool) continue;
+        const resolved = resolveToolType(tool);
+        if (!resolved) continue;
 
-        const gql = tool.adminQuery ?? tool.shopQuery ?? tool.adminMutation ?? tool.shopMutation ?? "";
+        const { mcpTool, argKey, gql } = resolved;
 
         pi.registerTool({
           name: `vendure_${tool.name}`,
@@ -198,13 +261,14 @@ function loadCustomTools(pi: ExtensionAPI): void {
           description: tool.description,
           parameters: Empty,
           execute: async () => {
-            const result = await callMcpTool(mcpTool, { query: gql });
-            return text(result);
+            await ensureConnected();
+            return makeResult(await callMcpTool(mcpTool, { [argKey]: gql }));
           },
         });
+        loaded++;
       }
 
-      console.error(`[vendure-pi] Loaded ${config.tools?.length ?? 0} custom tools from ${path}`);
+      console.error(`[vendure-pi] Loaded ${loaded} custom tools from ${path}`);
     } catch (err) {
       console.error(`[vendure-pi] Failed to load custom tools from ${path}:`, err);
     }
