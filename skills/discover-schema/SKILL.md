@@ -1,3 +1,6 @@
+---
+description: Discover Vendure GraphQL schema before running operations
+---
 # Discover Schema
 
 Before running any Vendure GraphQL operations, discover what's available.

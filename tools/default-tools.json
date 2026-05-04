@@ -1,0 +1,28 @@
+{
+  "tools": [
+    {
+      "name": "list_users",
+      "label": "List Users",
+      "description": "List all admin users",
+      "adminQuery": "query { administrators { items { id firstName lastName emailAddress } } }"
+    },
+    {
+      "name": "store_summary",
+      "label": "Store Summary",
+      "description": "Quick store overview: product count, order count, customer count",
+      "adminQuery": "query { products(options: { take: 0 }) { totalItems } orders(options: { take: 0 }) { totalItems } customers(options: { take: 0 }) { totalItems } }"
+    },
+    {
+      "name": "last_orders",
+      "label": "Last Orders",
+      "description": "List the 5 most recent orders with customer and total",
+      "adminQuery": "query { orders(options: { take: 5 sort: { createdAt: DESC } }) { items { id code state total totalWithTax currencyCode customer { firstName lastName } createdAt } } }"
+    },
+    {
+      "name": "browse_catalog",
+      "label": "Browse Catalog",
+      "description": "Browse the public product catalog",
+      "shopQuery": "query { search(input: { take: 10 }) { items { productId productName slug price { value currencyCode } productAsset { preview } } } }"
+    }
+  ]
+}
