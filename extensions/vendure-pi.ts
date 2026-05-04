@@ -10,7 +10,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { ExtensionAPI, ToolDefinition } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
 import { existsSync, readFileSync } from "fs";
 import { execSync } from "child_process";
@@ -78,9 +78,8 @@ export default async function vendureExtension(pi: ExtensionAPI): Promise<void> 
   pi.on("agent_start", async () => {
     try { await connectToMcpServer(); } catch { /* nop */ }
     setTimeout(() => {
-      const tools: ToolDefinition[] = pi.agent?.state?.tools ?? [];
-      const kept = tools.filter((t) => t.name?.startsWith("vendure_"));
-      if (kept.length && pi.agent) pi.agent.state.tools = kept;
+      const active = pi.getActiveTools().filter((t) => t.startsWith("vendure_"));
+      if (active.length) pi.setActiveTools(active);
     }, 50);
   });
 
