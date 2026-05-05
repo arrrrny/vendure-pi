@@ -1,5 +1,7 @@
 # @raptorr/vendure-pi
 
+[![npm version](https://img.shields.io/npm/v/vendure-pi.svg)](https://www.npmjs.com/package/vendure-pi) [![npm downloads](https://img.shields.io/npm/dm/vendure-pi.svg)](https://www.npmjs.com/package/vendure-pi)
+
 Pi agent extension for [Vendure](https://vendure.io) e-commerce management. Connect to your Vendure instance and manage products, orders, customers, and more through natural language.
 
 Requires [vendure-mcp-graphql](https://npmjs.com/package/vendure-mcp-graphql).
