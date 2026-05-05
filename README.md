@@ -1,4 +1,4 @@
-# @raptorr/vendure-pi
+# vendure-pi
 
 [![npm version](https://img.shields.io/npm/v/vendure-pi.svg)](https://www.npmjs.com/package/vendure-pi) [![npm downloads](https://img.shields.io/npm/dm/vendure-pi.svg)](https://www.npmjs.com/package/vendure-pi)
 
