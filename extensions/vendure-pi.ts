@@ -11,7 +11,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { existsSync, readFileSync } from "fs";
 import { execSync } from "child_process";
@@ -28,14 +28,20 @@ let connectionState: ConnectionState = "disconnected";
 let connectionPromise: Promise<void> | null = null;
 
 function findMcpServerPath(): string {
-  if (process.env.VENDURE_MCP_SERVER_PATH) return process.env.VENDURE_MCP_SERVER_PATH;
+  if (process.env.VENDURE_MCP_SERVER_PATH)
+    return process.env.VENDURE_MCP_SERVER_PATH;
   try {
-    const which = execSync("which vendure-mcp-graphql 2>/dev/null || echo ''", { encoding: "utf-8" }).trim();
+    const which = execSync("which vendure-mcp-graphql 2>/dev/null || echo ''", {
+      encoding: "utf-8",
+    }).trim();
     if (which) return which;
-  } catch { /* not on PATH */ }
-  if (existsSync("./mcp-graphql/dist/index.js")) return "./mcp-graphql/dist/index.js";
+  } catch {
+    /* not on PATH */
+  }
+  if (existsSync("./mcp-graphql/dist/index.js"))
+    return "./mcp-graphql/dist/index.js";
   throw new Error(
-    "vendure-mcp-graphql not found. Install with: npm install -g vendure-mcp-graphql"
+    "vendure-mcp-graphql not found. Install with: npm install -g vendure-mcp-graphql",
   );
 }
 
@@ -67,21 +73,32 @@ async function connectToMcpServer(): Promise<void> {
     env: {
       ...process.env,
       VENDURE_API_KEY: process.env.VENDURE_API_KEY ?? "",
-      ADMIN_API_URL: process.env.ADMIN_API_URL ?? "http://localhost:3000/admin-api",
-      SHOP_API_URL: process.env.SHOP_API_URL ?? "http://localhost:3000/shop-api",
+      ADMIN_API_URL:
+        process.env.ADMIN_API_URL ?? "http://localhost:3000/admin-api",
+      SHOP_API_URL:
+        process.env.SHOP_API_URL ?? "http://localhost:3000/shop-api",
     },
   });
-  const client = new Client({ name: "vendure-pi", version: "1.0.0" }, { capabilities: {} });
+  const client = new Client(
+    { name: "vendure-pi", version: "1.0.0" },
+    { capabilities: {} },
+  );
   await client.connect(transport);
   mcpClient = client;
   console.error("[vendure-pi] MCP connected");
 }
 
-async function callMcpTool(name: string, args: Record<string, unknown>): Promise<string> {
+async function callMcpTool(
+  name: string,
+  args: Record<string, unknown>,
+): Promise<string> {
   if (!mcpClient) await ensureConnected();
   if (!mcpClient) throw new Error("[vendure-pi] MCP client not connected");
 
-  const result = (await mcpClient.callTool({ name, arguments: args })) as CallToolResult;
+  const result = (await mcpClient.callTool({
+    name,
+    arguments: args,
+  })) as CallToolResult;
   const content = result.content as Array<{ type: string; text?: string }>;
   const text = content.map((c) => c.text ?? "").join("\n");
   return result.isError ? `Error: ${text}` : text;
@@ -105,12 +122,17 @@ function makeResult(value: string) {
 
 // ─── Extension ────────────────────────────────────────────
 
-export default async function vendureExtension(pi: ExtensionAPI): Promise<void> {
+export default async function vendureExtension(
+  pi: ExtensionAPI,
+): Promise<void> {
   pi.on("agent_start", async () => {
     try {
       await ensureConnected();
     } catch (err) {
-      console.error("[vendure-pi] MCP connection failed:", err instanceof Error ? err.message : err);
+      console.error(
+        "[vendure-pi] MCP connection failed:",
+        err instanceof Error ? err.message : err,
+      );
     }
   });
 
@@ -122,7 +144,12 @@ export default async function vendureExtension(pi: ExtensionAPI): Promise<void> 
     parameters: Query,
     execute: async (_, p) => {
       await ensureConnected();
-      return makeResult(await callMcpTool("admin_query", { query: p.query, variables: p.variables }));
+      return makeResult(
+        await callMcpTool("admin_query", {
+          query: p.query,
+          variables: p.variables,
+        }),
+      );
     },
   });
 
@@ -134,7 +161,12 @@ export default async function vendureExtension(pi: ExtensionAPI): Promise<void> 
     parameters: Mutation,
     execute: async (_, p) => {
       await ensureConnected();
-      return makeResult(await callMcpTool("admin_mutation", { mutation: p.mutation, variables: p.variables }));
+      return makeResult(
+        await callMcpTool("admin_mutation", {
+          mutation: p.mutation,
+          variables: p.variables,
+        }),
+      );
     },
   });
 
@@ -146,7 +178,12 @@ export default async function vendureExtension(pi: ExtensionAPI): Promise<void> 
     parameters: Query,
     execute: async (_, p) => {
       await ensureConnected();
-      return makeResult(await callMcpTool("shop_query", { query: p.query, variables: p.variables }));
+      return makeResult(
+        await callMcpTool("shop_query", {
+          query: p.query,
+          variables: p.variables,
+        }),
+      );
     },
   });
 
@@ -158,14 +195,20 @@ export default async function vendureExtension(pi: ExtensionAPI): Promise<void> 
     parameters: Mutation,
     execute: async (_, p) => {
       await ensureConnected();
-      return makeResult(await callMcpTool("shop_mutation", { mutation: p.mutation, variables: p.variables }));
+      return makeResult(
+        await callMcpTool("shop_mutation", {
+          mutation: p.mutation,
+          variables: p.variables,
+        }),
+      );
     },
   });
 
   pi.registerTool({
     name: "vendure_list_admin_operations",
     label: "List Admin Operations",
-    description: "Discover all available GraphQL queries and mutations on the Admin API with descriptions.",
+    description:
+      "Discover all available GraphQL queries and mutations on the Admin API with descriptions.",
     parameters: Empty,
     execute: async () => {
       await ensureConnected();
@@ -176,7 +219,8 @@ export default async function vendureExtension(pi: ExtensionAPI): Promise<void> 
   pi.registerTool({
     name: "vendure_get_admin_schema",
     label: "Get Admin Schema",
-    description: "Full Admin API GraphQL introspection. Use when you need detailed type information. Prefer vendure_list_admin_operations for quick discovery.",
+    description:
+      "Full Admin API GraphQL introspection. Use when you need detailed type information. Prefer vendure_list_admin_operations for quick discovery.",
     parameters: Empty,
     execute: async () => {
       await ensureConnected();
@@ -187,7 +231,8 @@ export default async function vendureExtension(pi: ExtensionAPI): Promise<void> 
   pi.registerTool({
     name: "vendure_list_shop_operations",
     label: "List Shop Operations",
-    description: "Discover all available GraphQL queries and mutations on the Shop API with descriptions.",
+    description:
+      "Discover all available GraphQL queries and mutations on the Shop API with descriptions.",
     parameters: Empty,
     execute: async () => {
       await ensureConnected();
@@ -198,7 +243,8 @@ export default async function vendureExtension(pi: ExtensionAPI): Promise<void> 
   pi.registerTool({
     name: "vendure_get_shop_schema",
     label: "Get Shop Schema",
-    description: "Full Shop API GraphQL introspection. Prefer vendure_list_shop_operations for quick discovery.",
+    description:
+      "Full Shop API GraphQL introspection. Prefer vendure_list_shop_operations for quick discovery.",
     parameters: Empty,
     execute: async () => {
       await ensureConnected();
@@ -225,11 +271,25 @@ interface VendureToolsConfig {
   tools: CustomToolConfig[];
 }
 
-function resolveToolType(tool: CustomToolConfig): { mcpTool: string; argKey: string; gql: string } | null {
-  if (tool.adminQuery) return { mcpTool: "admin_query", argKey: "query", gql: tool.adminQuery };
-  if (tool.shopQuery) return { mcpTool: "shop_query", argKey: "query", gql: tool.shopQuery };
-  if (tool.adminMutation) return { mcpTool: "admin_mutation", argKey: "mutation", gql: tool.adminMutation };
-  if (tool.shopMutation) return { mcpTool: "shop_mutation", argKey: "mutation", gql: tool.shopMutation };
+function resolveToolType(
+  tool: CustomToolConfig,
+): { mcpTool: string; argKey: string; gql: string } | null {
+  if (tool.adminQuery)
+    return { mcpTool: "admin_query", argKey: "query", gql: tool.adminQuery };
+  if (tool.shopQuery)
+    return { mcpTool: "shop_query", argKey: "query", gql: tool.shopQuery };
+  if (tool.adminMutation)
+    return {
+      mcpTool: "admin_mutation",
+      argKey: "mutation",
+      gql: tool.adminMutation,
+    };
+  if (tool.shopMutation)
+    return {
+      mcpTool: "shop_mutation",
+      argKey: "mutation",
+      gql: tool.shopMutation,
+    };
   return null;
 }
 
@@ -270,7 +330,10 @@ function loadCustomTools(pi: ExtensionAPI): void {
 
       console.error(`[vendure-pi] Loaded ${loaded} custom tools from ${path}`);
     } catch (err) {
-      console.error(`[vendure-pi] Failed to load custom tools from ${path}:`, err);
+      console.error(
+        `[vendure-pi] Failed to load custom tools from ${path}:`,
+        err,
+      );
     }
   }
 }
